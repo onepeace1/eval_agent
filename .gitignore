@@ -10,3 +10,6 @@ wandb/
 # Zip-based submission artifacts (scripts/package_submission.py).
 submission*.zip
 submission/
+
+# Local Docker SkyRL servers (skyrl_tinker_docker/serve.py)
+skyrl_state/
