@@ -1,4 +1,9 @@
-"""Run authored tasks through the original pinned mini-SWE-agent scaffold."""
+"""Run authored tasks through the original pinned mini-SWE-agent scaffold.
+
+Each task runs in a fresh local Docker container by default
+(workflow/docker_runner.py), or in the deployed Modal runner with
+``HW2_BACKEND=modal``.
+"""
 
 from __future__ import annotations
 
@@ -163,7 +168,15 @@ def main(argv: list[str] | None = None) -> None:
     except (OSError, ValueError) as error:
         parser.error(str(error))
 
-    remote = modal.Function.from_name(RUNNER_APP, RUNNER_FUNCTION)
+    from .docker_runner import DockerAgentRunner, backend
+
+    if backend() == "modal":
+        remote = modal.Function.from_name(RUNNER_APP, RUNNER_FUNCTION)
+    else:
+        try:
+            remote = DockerAgentRunner()
+        except RuntimeError as error:
+            parser.error(str(error))
     failures = 0
     jobs = [
         (task, descriptor, AGENT_BY_KEY[key])
@@ -194,4 +207,4 @@ def main(argv: list[str] | None = None) -> None:
             failures += 1
             progress.write(f"ERROR {task.task_id} / {agent.key}: {error}")
     if failures:
-        raise SystemExit(f"{failures} run(s) failed remotely; rerun to resume")
+        raise SystemExit(f"{failures} run(s) failed; rerun to resume")

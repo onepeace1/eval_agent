@@ -1,4 +1,45 @@
-# Student-owned Modal endpoints
+# Model endpoints and the agent runner
+
+## Local Docker (default)
+
+Everything below the "Modal" heading can also run on your own GPU. The Docker
+files live in `infrastructure/docker/`; they serve the same models with the
+same vLLM versions and flags, and run the same pinned mini-SWE-agent runner.
+
+```bash
+python3 infrastructure/docker/serve.py build          # vLLM 0.13 + agent-runner images
+python3 infrastructure/docker/serve.py build --glm    # only if you need GLM-4.7-Flash
+python3 infrastructure/docker/serve.py up validator --gpus 3
+python3 infrastructure/docker/serve.py up qwen --gpus 3        # Part 3 models, as needed
+python3 infrastructure/docker/serve.py env            # paste the printed lines into .env
+uv run python -m workflow generate --models qwen      # runs in local containers
+python3 infrastructure/docker/serve.py down all
+```
+
+| Name | Model | Alias | Port | Default GPU share |
+| --- | --- | --- | --- | --- |
+| `validator` | `Qwen/Qwen3-VL-30B-A3B-Instruct-FP8` | `validator` | 8201 | 0.45 |
+| `qwen` | `Qwen/Qwen2.5-Coder-3B-Instruct` | `qwen` | 8202 | 0.15 |
+| `ministral` | `mistralai/Ministral-3-14B-Instruct-2512` | `ministral` | 8203 | 0.35 |
+| `glm` | `zai-org/GLM-4.7-Flash` | `glm-4.7` | 8204 | 0.85 |
+
+- Validator, qwen and ministral fit on one 96 GB GPU together. GLM needs most
+  of a GPU, so run it alone or on another GPU (`--gpus 4`). Change a share with
+  `--gpu-memory-utilization`.
+- Weights are cached in `~/.cache/huggingface`, so each model downloads once.
+  Starting a cached model takes a few minutes (load + compile + warmup).
+- `workflow generate` starts one fresh `hw2-agent-runner` container per task
+  (`workflow/docker_runner.py`). The container runs
+  `infrastructure/agent_runner.py` unchanged; the only substitution is that
+  its gateway call runs in-process (`docker/local_runner.py`) instead of
+  through a deployed Modal function. The endpoint registry is removed from the
+  environment before the agent starts, so agent-written commands cannot see it.
+- Runner containers reach the models over the `hw2-net` Docker network, so
+  localhost URLs in `.env` are rewritten to `http://hw2-<name>:8000/v1` for
+  them. Non-local URLs (e.g. Modal) are used as written.
+- Set `HW2_BACKEND=modal` to use the deployed Modal runner instead.
+
+## Modal
 
 These files are the canonical model deployments for both student development
 and staff grading. Each Modal workspace gets its own apps, volumes, endpoint
