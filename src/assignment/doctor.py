@@ -1,20 +1,23 @@
-"""Validate local assignment configuration without launching a Modal sandbox."""
+"""Validate local assignment configuration without launching a sandbox."""
 
 from __future__ import annotations
 
 import argparse
 import os
+import subprocess
 from urllib.parse import urlparse
 
 import httpx
 from dotenv import load_dotenv
 from modal.config import Config
 
+from assignment.docker_backend import backend
 from assignment.task import Task
 from assignment.utils.image import SourceMismatch, verify_source
 
 
 TASKS = ("tasks/chess-terminal-move",)
+LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1"}
 PLACEHOLDERS = ("replace-", "course-key", "<", ">")
 
 
@@ -45,11 +48,29 @@ def main() -> int:
         except (FileNotFoundError, SourceMismatch, ValueError) as exc:
             failures.append(f"{task_path}: {exc}")
 
-    modal_config = Config()
-    if modal_config.get("token_id") and modal_config.get("token_secret"):
-        print("[ok] Modal credentials are configured")
-    else:
-        failures.append("Modal credentials are missing; run `uv run modal setup`")
+    try:
+        sandbox_backend = backend()
+    except ValueError as exc:
+        failures.append(str(exc))
+        sandbox_backend = ""
+    if sandbox_backend == "modal":
+        modal_config = Config()
+        if modal_config.get("token_id") and modal_config.get("token_secret"):
+            print("[ok] Modal credentials are configured")
+        else:
+            failures.append("Modal credentials are missing; run `uv run modal setup`")
+    elif sandbox_backend == "docker":
+        try:
+            info = subprocess.run(
+                ["docker", "info", "--format", "{{.ServerVersion}}"],
+                capture_output=True, text=True, timeout=20,
+            )
+            if info.returncode == 0:
+                print(f"[ok] sandbox backend: docker (server {info.stdout.strip()})")
+            else:
+                failures.append(f"docker is not usable: {info.stderr.strip()}")
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            failures.append(f"docker is not usable: {exc}")
 
     api_key = _configured("OPENAI_API_KEY")
     base_url = _configured("OPENAI_BASE_URL")
@@ -64,8 +85,12 @@ def main() -> int:
         failures.append("OPENAI_MODEL is missing")
     if base_url:
         parsed = urlparse(base_url)
-        if parsed.scheme != "https" or not parsed.netloc:
-            failures.append("OPENAI_BASE_URL must be a complete HTTPS URL")
+        local = parsed.scheme == "http" and parsed.hostname in LOCAL_HOSTS
+        if not (parsed.scheme == "https" or local) or not parsed.netloc:
+            failures.append(
+                "OPENAI_BASE_URL must be a complete HTTPS URL, or http://localhost "
+                "for a local server (scripts/local_llm.py)"
+            )
         else:
             print(f"[ok] inference endpoint: {parsed.netloc}")
     else:
@@ -101,9 +126,9 @@ def main() -> int:
     if failures:
         for failure in failures:
             print(f"[error] {failure}")
-        print("Configuration is not ready; no Modal sandbox was launched.")
+        print("Configuration is not ready; no sandbox was launched.")
         return 1
-    print("Assignment configuration is ready; no Modal sandbox was launched.")
+    print("Assignment configuration is ready; no sandbox was launched.")
     return 0
 
 

@@ -1,4 +1,4 @@
-"""Build a task's testbed image on Modal from a local checkout.
+"""Build a task's testbed image, on Modal or locally with Docker, from a local checkout.
 
 The repository under test is copied in from `task.source` — normally the
 `chess_app/` submodule — rather than cloned inside the build. That keeps the
@@ -19,6 +19,7 @@ from pathlib import Path
 
 import modal
 
+from assignment.docker_backend import LocalImage, backend
 from assignment.task import Task
 
 logger = logging.getLogger(__name__)
@@ -84,21 +85,32 @@ def verify_source(task: Task, strict: bool = True) -> None:
             "which silently invalidates the evaluation if one of them is the fix."
         )
 
-def build_testbed_image(task: Task, strict: bool = True, force_build: bool = False) -> modal.Image:
+def build_testbed_image(
+    task: Task, strict: bool = True, force_build: bool = False
+) -> "modal.Image | LocalImage":
     """Build the image holding the repository under test at its base commit.
 
     Args:
         task: The task whose Dockerfile and source checkout to build from.
         strict: Refuse to build when the checkout does not match the task's
             base commit. See `verify_source`.
-        force_build: Skip Modal's build cache.
+        force_build: Skip the build cache.
 
     Returns:
-        A Modal image with the repository installed at /testbed.
+        An image with the repository installed at /testbed: a `modal.Image`
+        with ``SANDBOX_BACKEND=modal``, otherwise a `LocalImage` that Docker
+        builds when the sandbox starts.
     """
     verify_source(task, strict=strict)
 
     logger.info("Building %s from %s at %s", task.id, task.source, task.base_commit[:12])
+    if backend() == "docker":
+        image = LocalImage.from_dockerfile(
+            task.dockerfile, task.source, force_build=force_build, ignore=is_ignored
+        )
+        # Same layer order as Modal: the task's Dockerfile, then the pins.
+        return image.pip_install(*task.pins)
+
     image = modal.Image.from_dockerfile(
         str(task.dockerfile),
         context_dir=str(task.source),

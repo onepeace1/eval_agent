@@ -1,9 +1,10 @@
-.PHONY: setup doctor verify-sources test test-modal test-chess-modal check-part1 check-swebench \
+.PHONY: setup doctor verify-sources test test-modal test-chess-modal test-docker test-chess-docker \
+	llm-up llm-down check-part1 check-swebench \
 	run-code-agent run-swebench-agent run-chess-agent \
 	run-obs-experiment-no-legal-moves run-obs-experiment-legal-moves \
 	run-obs-deepseek-no-legal run-obs-deepseek-legal \
 	run-obs-gpt-oss-no-legal run-obs-gpt-oss-legal \
-	run-chess-modal instructor-eval-base instructor-eval-gold instructor-eval-patch
+	run-chess-modal run-chess-sandbox instructor-eval-base instructor-eval-gold instructor-eval-patch
 
 TASK ?= tasks/chess-terminal-move
 CODE_SKILLS ?= tasks/code-skills
@@ -45,12 +46,29 @@ verify-sources:
 test:
 	uv run pytest
 
-# Slow and billable: launches real Modal sandboxes.
+# Slow but free: launches real local Docker sandboxes (the default backend).
+test-docker:
+	uv run pytest -m docker tests/test_docker_env.py
+
+test-chess-docker:
+	uv run pytest -m docker tests/test_docker_chess_sandbox.py
+
+# Local OpenAI-compatible model server (vLLM in Docker) in place of the course
+# endpoint. Prints the .env lines to use.
+LLM_GPUS ?= 3
+LLM_MODEL ?= $(GPT_OSS_MODEL)
+llm-up:
+	python3 scripts/local_llm.py up --gpus $(LLM_GPUS) --model $(LLM_MODEL)
+
+llm-down:
+	python3 scripts/local_llm.py down
+
+# Slow and billable: launches real Modal sandboxes (SANDBOX_BACKEND=modal).
 test-modal:
-	uv run pytest -m modal
+	SANDBOX_BACKEND=modal uv run pytest -m modal
 
 test-chess-modal:
-	uv run pytest -m modal tests/test_chess_sandbox.py
+	SANDBOX_BACKEND=modal uv run pytest -m modal tests/test_chess_sandbox.py
 
 # Apply the student's generated patch to a fresh testbed and run the public
 # Part 1 regression test plus the existing chess-app suite.
@@ -105,5 +123,7 @@ run-obs-gpt-oss-no-legal:
 run-obs-gpt-oss-legal:
 	$(MAKE) run-obs-experiment-legal-moves MODEL="$(GPT_OSS_MODEL)" MODEL_TAG=gpt-oss
 
+# Serves the chess app from a sandbox on the configured backend (Docker by default).
+run-chess-sandbox: run-chess-modal
 run-chess-modal:
 	uv run assignment-chess-modal --task $(TASK) --sandbox-timeout $(CHESS_TIMEOUT) $(if $(wildcard $(PATCH)),--patch $(PATCH),)

@@ -1,4 +1,4 @@
-"""Run the chess server in a Modal sandbox and play moves against it.
+"""Run the chess server in a sandbox (Docker or Modal) and play moves against it.
 
 This is the part 2 surface. It does not know anything about fixing the bug: it
 takes an optional patch (the fix produced in part 1), applies it to the
@@ -10,6 +10,7 @@ from __future__ import annotations
 import base64
 import json
 import time
+from http.client import HTTPException
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.request import urlopen
@@ -145,7 +146,10 @@ class ChessSandbox(Environment):
                 if response.status == 200 and payload == {"status": "ok"}:
                     return
                 last_error = f"unexpected health response: {payload!r}"
-            except (HTTPError, URLError, TimeoutError, json.JSONDecodeError) as exc:
+            # ConnectionError/HTTPException: a local Docker port accepts the
+            # connection before the server listens, then drops it.
+            except (HTTPError, URLError, TimeoutError, ConnectionError, HTTPException,
+                    json.JSONDecodeError) as exc:
                 last_error = str(exc)
             time.sleep(0.25)
 
@@ -208,14 +212,14 @@ def main() -> None:
     """Launch a chess sandbox and keep it alive until the user exits."""
     import argparse
 
-    parser = argparse.ArgumentParser(description="Serve the chess app from a Modal sandbox")
+    parser = argparse.ArgumentParser(description="Serve the chess app from a sandbox")
     parser.add_argument("--patch", type=Path, help="Fix to apply before serving, e.g. the part 1 output")
     parser.add_argument("--task", type=Path, help="Task directory to serve the testbed of")
     parser.add_argument(
         "--sandbox-timeout",
         type=int,
         default=1800,
-        help="maximum lifetime of the Modal sandbox in seconds",
+        help="maximum lifetime of the sandbox in seconds",
     )
     args = parser.parse_args()
 
